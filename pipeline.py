@@ -23,6 +23,15 @@ HERE = Path(__file__).resolve().parent
 import source_guards as READER
 import workbook_writer as WRITER
 
+class SourceMismatch(ValueError):
+    """Known registration/model mismatch with precise fictional source locators."""
+    def __init__(self, vehicle_id, xlsx_source, contract_source, differences):
+        super().__init__("Vehicle/contract mismatch")
+        self.details = {"code": "VEHICLE_CONTRACT_MISMATCH", "vehicle_id": vehicle_id,
+                        "xlsx_source": xlsx_source, "contract_source": contract_source,
+                        "differences": differences}
+
+
 def extract_report(vehicles_path, contracts_path, installments_path, month):
     month = WRITER.month_key(month)
     inputs = [Path(p).resolve(strict=True) for p in
@@ -53,9 +62,13 @@ def extract_report(vehicles_path, contracts_path, installments_path, month):
         if vehicle not in vehicles or vehicle in contracts:
             raise ValueError("Duplicate/unknown contract vehicle")
         expected = vehicles[vehicle]
-        if (READER.field(text, "Registration") != expected["registration"] or
-                READER.field(text, "Model") != expected["model"]):
-            raise ValueError("Vehicle/contract mismatch")
+        actual = {"registration": READER.field(text, "Registration"),
+                  "model": READER.field(text, "Model")}
+        differences = [{"field": key, "xlsx_value": expected[key], "pdf_value": actual[key]}
+                       for key in ("registration", "model") if actual[key] != expected[key]]
+        if differences:
+            raise SourceMismatch(vehicle, expected["xlsx_source"],
+                                 f"{inputs[1].name}#page={page}", differences)
         contracts[vehicle] = {"total": READER.jint(READER.field(text, "Finance total JPY")),
                               "source": f"{inputs[1].name}#page={page}"}
     if set(contracts) != set(vehicles):
